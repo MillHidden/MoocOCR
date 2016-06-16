@@ -5,16 +5,17 @@
 namespace OC\PlatformBundle\Controller;
 
 use OC\PlatformBundle\Entity\Advert;
-use OC\PlatformBundle\Event\MessagePostEvent;
-use OC\PlatformBundle\Event\PlatformEvents;
-use OC\PlatformBundle\Form\AdvertEditType;
 use OC\PlatformBundle\Form\AdvertType;
-use Sensio\Bundle\FrameworkExtraBundle\Configuration\ParamConverter;
+use OC\PlatformBundle\Form\AdvertEditType;
+use OC\PlatformBundle\Event\PlatformEvents;
+use OC\PlatformBundle\Event\MessagePostEvent;
+
 use Symfony\Bundle\FrameworkBundle\Controller\Controller;
-use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Sensio\Bundle\FrameworkExtraBundle\Configuration\Security;
+use Sensio\Bundle\FrameworkExtraBundle\Configuration\ParamConverter;
 
 class AdvertController extends Controller
 {
@@ -53,7 +54,7 @@ class AdvertController extends Controller
 
   public function viewAction(Advert $advert)
   {
-    $em = $this->getDoctrine()->getManager();
+    $em = $this->getDoctrine()->getManager(); 
 
     // Récupération de la liste des candidatures de l'annonce
     $listApplications = $em
@@ -74,48 +75,62 @@ class AdvertController extends Controller
     ));
   }
 
-  /**
-   * @Security("has_role('ROLE_AUTEUR')")
-   */
+  
   public function addAction(Request $request)
-  {
-    // Plus besoin du if avec le security.context, l'annotation s'occupe de tout !
-    // Dans cette méthode, vous êtes sûrs que l'utilisateur courant dispose du rôle ROLE_AUTEUR
-
+  { 
     $advert = new Advert();
-    $form   = $this->get('form.factory')->create(AdvertType::class, $advert);
+    $advert->setUser($this->getUser());
+
+    $form = $this
+      ->get('form.factory')
+      ->create(AdvertType::class, $advert)
+    ;   
 
     if ($request->isMethod('POST') && $form->handleRequest($request)->isValid()) {
-      // On crée l'évènement avec ses 2 arguments
+      
       $event = new MessagePostEvent($advert->getContent(), $advert->getUser());
 
-      // On déclenche l'évènement
-      $this->get('event_dispatcher')->dispatch(PlatformEvents::POST_MESSAGE, $event);
+      $this
+        ->get('event_dispatcher')
+        ->dispatch(PlatformEvents::POST_MESSAGE, $event)
+      ;
 
-      // On récupère ce qui a été modifié par le ou les listeners, ici le message
       $advert->setContent($event->getMessage());
 
       $em = $this->getDoctrine()->getManager();
       $em->persist($advert);
       $em->flush();
 
-      $request->getSession()->getFlashBag()->add('notice', 'Annonce bien enregistrée.');
+      $request
+        ->getSession()
+        ->getFlashBag()
+        ->add('notice', 'Annonce bien enregistrée.')
+      ;
 
       return $this->redirectToRoute('oc_platform_view', array('id' => $advert->getId()));
     }
-
+    
     return $this->render('OCPlatformBundle:Advert:add.html.twig', array(
       'form' => $form->createView(),
     ));
   }
 
-  public function editAction(Advert $advert, Request $request)
+  public function editAction($id, Request $request)
   {
-    $form = $this->get('form.factory')->create(AdvertEditType::class, $advert);
+    $em = $this->getDoctrine()->getManager();
+
+    $advert = $em->getRepository('OCPlatformBundle:Advert')->find($id);
+
+    if (null === $advert) {
+      throw new NotFoundHttpException("L'annonce d'id ".$id." n'existe pas.");
+    }
+
+    $form = $this
+      ->get('form.factory')
+      ->create(AdvertEditType::class, $advert)      
+    ;    
 
     if ($request->isMethod('POST') && $form->handleRequest($request)->isValid()) {
-      // Inutile de persister ici, Doctrine connait déjà notre annonce
-      $em = $this->getDoctrine()->getManager();
       $em->flush();
 
       $request->getSession()->getFlashBag()->add('notice', 'Annonce bien modifiée.');
@@ -124,31 +139,38 @@ class AdvertController extends Controller
     }
 
     return $this->render('OCPlatformBundle:Advert:edit.html.twig', array(
-      'advert' => $advert,
-      'form'   => $form->createView(),
+      'advert'  => $advert,
+      'form'    => $form->createView(),
     ));
   }
 
-  public function deleteAction(Request $request, Advert $advert)
+  public function deleteAction(Request $request, $id)
   {
     $em = $this->getDoctrine()->getManager();
 
-    // On crée un formulaire vide, qui ne contiendra que le champ CSRF
-    // Cela permet de protéger la suppression d'annonce contre cette faille
-    $form = $this->get('form.factory')->create();
+    $advert = $em->getRepository('OCPlatformBundle:Advert')->find($id);
+
+    if (null === $advert) {
+      throw new NotFoundHttpException("L'annonce d'id ".$id." n'existe pas.");
+    }
+
+    $form = $this
+      ->get('form.factory')
+      ->create()      
+    ;
 
     if ($request->isMethod('POST') && $form->handleRequest($request)->isValid()) {
       $em->remove($advert);
       $em->flush();
 
-      $request->getSession()->getFlashBag()->add('info', "L'annonce a bien été supprimée.");
+      $request->getSession()->getFlashBag()->add('notice', "L'annonce a bien été supprimée.");
 
       return $this->redirectToRoute('oc_platform_home');
-    }
+    }    
     
     return $this->render('OCPlatformBundle:Advert:delete.html.twig', array(
       'advert' => $advert,
-      'form'   => $form->createView(),
+      'form'   => $form->createView()
     ));
   }
 
@@ -184,6 +206,30 @@ class AdvertController extends Controller
     return $this->redirectToRoute('oc_platform_home');
   }
 
+  public function testAction()
+  {
+    $advert = new Advert;
+        
+    $advert->setDate(new \Datetime());  // Champ « date » OK
+    $advert->setTitle('abcdefghijlkalde');           // Champ « title » incorrect : moins de 10 caractères
+    //$advert->setContent('blabla');    // Champ « content » incorrect : on ne le définit pas
+    $advert->setAuthor('ABgeft');            // Champ « author » incorrect : moins de 2 caractères
+    $advert->setContent('blablablabla content');
+    // On récupère le service validator
+    $validator = $this->get('validator');
+        
+    // On déclenche la validation sur notre object
+    $listErrors = $validator->validate($advert);
+
+    // Si $listErrors n'est pas vide, on affiche les erreurs
+    if(count($listErrors) > 0) {
+      // $listErrors est un objet, sa méthode __toString permet de lister joliement les erreurs
+      return new Response((string) $listErrors);
+    } else {
+      return new Response("L'annonce est valide !");
+    }
+  }
+
   public function translationAction($name)
   {
     return $this->render('OCPlatformBundle:Advert:translation.html.twig', array(
@@ -194,7 +240,7 @@ class AdvertController extends Controller
   /**
    * @ParamConverter("json")
    */
-  public function ParamConverterAction($json)
+  public function paramConverterAction($json)
   {
     return new Response(print_r($json, true));
   }
